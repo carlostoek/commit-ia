@@ -63,6 +63,8 @@ export async function setOpenRouterApiKey(key) {
  * Inicializa la conexión con OpenRouter
  */
 export async function initOpenRouter() {
+  const debug = process.env.DEBUG === '1' || process.env.DEBUG === 'true';
+
   try {
     const key = await getOpenRouterApiKey();
 
@@ -74,7 +76,16 @@ export async function initOpenRouter() {
       );
     }
 
+    if (debug) {
+      console.log('[DEBUG] API key cargada correctamente');
+    }
+
     apiKey = key;
+
+    if (debug) {
+      console.log('[DEBUG] OpenRouter inicializado');
+    }
+
     return true;
   } catch (error) {
     throw new Error(`Error al inicializar OpenRouter: ${error.message}`);
@@ -96,6 +107,14 @@ async function callOpenRouter(messages, model = null, maxTokens = null, temperat
   const selectedMaxTokens = maxTokens || CONFIG.MAX_TOKENS;
   const selectedTemperature = temperature !== null ? temperature : CONFIG.TEMPERATURE;
 
+  const debug = process.env.DEBUG === '1' || process.env.DEBUG === 'true';
+
+  if (debug) {
+    console.log('[DEBUG] Enviando petición a OpenRouter...');
+    console.log(`[DEBUG] Modelo: ${selectedModel}`);
+    console.log(`[DEBUG] Mensajes: ${messages.length}`);
+  }
+
   const response = await fetch(`${CONFIG.OPENROUTER_BASE_URL}/chat/completions`, {
     method: 'POST',
     headers: {
@@ -112,6 +131,10 @@ async function callOpenRouter(messages, model = null, maxTokens = null, temperat
     })
   });
 
+  if (debug) {
+    console.log(`[DEBUG] Respuesta recibida: HTTP ${response.status}`);
+  }
+
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
     throw new Error(
@@ -122,8 +145,16 @@ async function callOpenRouter(messages, model = null, maxTokens = null, temperat
 
   const data = await response.json();
 
+  if (debug) {
+    console.log(`[DEBUG] Datos parseados. Choices: ${data.choices?.length || 0}`);
+  }
+
   if (!data.choices || data.choices.length === 0) {
     throw new Error('La API no devolvió respuesta válida');
+  }
+
+  if (debug) {
+    console.log('[DEBUG] Respuesta procesada correctamente');
   }
 
   return {
