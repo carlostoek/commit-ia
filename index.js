@@ -24,15 +24,14 @@ async function nonInteractiveCommitMode(cliArgs) {
     }
 
     // Inicializar Puter
-    const spinner = interactive.createSpinner('Conectando con Puter...');
+    const spinner = interactive.createSpinner('Conectando con OpenRouter...');
     spinner.start();
 
     try {
-      const puter = await ai.initPuter();
-      storage.initStorage(puter);
-      spinner.succeed('Conectado con Puter ✓');
+      await ai.initOpenRouter();
+      spinner.succeed('Conectado con OpenRouter ✓');
     } catch (error) {
-      spinner.fail('Error al conectar con Puter');
+      spinner.fail('Error al conectar con OpenRouter');
       interactive.showError(error.message);
       process.exit(1);
     }
@@ -87,6 +86,11 @@ async function nonInteractiveCommitMode(cliArgs) {
         console.log(chalk.gray('---'));
         console.log(chalk.green(message.body));
       }
+      // Mostrar modelo usado
+      if (message.model) {
+        console.log(chalk.gray('---'));
+        console.log(chalk.gray(`Modelo: ${message.model}`));
+      }
     } else {
       console.log(chalk.green(message));
     }
@@ -140,7 +144,7 @@ async function nonInteractivePRMode(cliArgs) {
     }
 
     // Inicializar Puter
-    const spinner = interactive.createSpinner('Conectando con Puter...');
+    const spinner = interactive.createSpinner('Conectando con OpenRouter...');
     spinner.start();
 
     let puter;
@@ -149,7 +153,7 @@ async function nonInteractivePRMode(cliArgs) {
       storage.initStorage(puter);
       spinner.succeed('Conectado con Puter ✓');
     } catch (error) {
-      spinner.fail('Error al conectar con Puter');
+      spinner.fail('Error al conectar con OpenRouter');
       interactive.showError(error.message);
       process.exit(1);
     }
@@ -262,15 +266,14 @@ async function interactiveMode(cliArgs) {
     interactive.showRepositoryInfo(repoInfo);
 
     // Inicializar Puter
-    const spinner = interactive.createSpinner('Conectando con Puter...');
+    const spinner = interactive.createSpinner('Conectando con OpenRouter...');
     spinner.start();
 
     try {
-      const puter = await ai.initPuter();
-      storage.initStorage(puter);
-      spinner.succeed('Conectado con Puter ✓');
+      await ai.initOpenRouter();
+      spinner.succeed('Conectado con OpenRouter ✓');
     } catch (error) {
-      spinner.fail('Error al conectar con Puter');
+      spinner.fail('Error al conectar con OpenRouter');
       interactive.showError(error.message);
       process.exit(1);
     }

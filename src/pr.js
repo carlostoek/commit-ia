@@ -1,28 +1,6 @@
 import { CONFIG } from './config.js';
 
 /**
- * Extrae un mensaje de error legible de diferentes estructuras de error
- */
-function extractErrorMessage(error) {
-  if (typeof error === 'string') {
-    return error;
-  }
-  if (error?.message) {
-    return error.message;
-  }
-  if (error?.error?.message) {
-    return error.error.message;
-  }
-  if (error?.error?.code) {
-    return error.error.code;
-  }
-  if (error?.code) {
-    return error.code;
-  }
-  return 'Error desconocido';
-}
-
-/**
  * Genera título y descripción de PR basado en cambios
  */
 export async function generatePRContent(diff, puter, model = null) {
@@ -62,7 +40,7 @@ La descripción debe explicar qué cambios se hacen y por qué.`;
       fullContent: content
     };
   } catch (error) {
-    throw new Error(`Error al generar contenido de PR: ${extractErrorMessage(error)}`);
+    throw new Error(`Error al generar contenido de PR: ${error.message}`);
   }
 }
 
@@ -98,7 +76,7 @@ export async function getRepositoryInfo(git) {
       fetchUrl
     };
   } catch (error) {
-    throw new Error(`Error al obtener información del repositorio: ${extractErrorMessage(error)}`);
+    throw new Error(`Error al obtener información del repositorio: ${error.message}`);
   }
 }
 
@@ -183,6 +161,6 @@ export async function validatePRRequirements(git) {
 
     return true;
   } catch (error) {
-    throw new Error(`Validación de PR falló: ${extractErrorMessage(error)}`);
+    throw new Error(`Validación de PR falló: ${error.message}`);
   }
 }

@@ -1,8 +1,17 @@
 // Configuración global de la CLI
 
 export const CONFIG = {
-  // Modelos por defecto
-  DEFAULT_MODEL: 'gpt-5.4-nano',
+  // Configuración de OpenRouter
+  OPENROUTER_API_KEY: process.env.OPENROUTER_API_KEY || '',
+  OPENROUTER_BASE_URL: 'https://openrouter.ai/api/v1',
+
+  // Modelos gratuitos disponibles
+  FREE_MODELS: {
+    AUTO: 'openrouter/free'  // Router automático (elige el mejor modelo gratuito disponible)
+  },
+
+  // Modelo por defecto (gratuito)
+  DEFAULT_MODEL: 'openrouter/free',
   
   // Estilo por defecto
   DEFAULT_STYLE: 'conventional',
@@ -102,6 +111,9 @@ Si no hay cambios significativos para el cuerpo, escribe "Sin cambios adicionale
 };
 
 export const MODELS = {
+  free: [
+    { name: '🆓 Auto (Router gratuito - Recomendado)', value: 'openrouter/free', description: 'Elige automáticamente el mejor modelo gratuito disponible' }
+  ],
   fast: [
     { name: 'GPT-5.4 Nano (Rápido)', value: 'gpt-5.4-nano' },
     { name: 'Gemini 2.5 Flash', value: 'gemini-2.5-flash' },

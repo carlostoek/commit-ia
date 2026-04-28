@@ -28,8 +28,12 @@ export async function selectStyle(defaultStyle = 'conventional') {
 /**
  * Selecciona un modelo de IA
  */
-export async function selectModel(defaultModel = 'gpt-5.4-nano') {
+export async function selectModel(defaultModel = 'openrouter/free') {
   const allModels = [
+    new inquirer.Separator(chalk.green('🆓 MODELOS GRATUITOS (Recomendados)')),
+    ...MODELS.free,
+    new inquirer.Separator('─────────────────'),
+    new inquirer.Separator(chalk.yellow('💰 Modelos de Pago')),
     ...MODELS.fast,
     new inquirer.Separator('─────────────────'),
     ...MODELS.balanced,
@@ -290,7 +294,7 @@ export function showWelcomeBanner() {
 ║        🤖 Commit AI CLI - Generador de Commits IA         ║
 ║                                                            ║
 ║  Genera automáticamente mensajes de commit usando IA      ║
-║  Potenciado por Puter.js                                  ║
+║  Potenciado por OpenRouter (Modelos Gratuitos)            ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
   `));

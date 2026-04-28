@@ -15,9 +15,9 @@ export function initStorage(puterInstance) {
 export async function saveCommit(message, diff, style, model) {
   try {
     if (!puter) {
-      throw new Error('Storage no inicializado');
+      return null;
     }
-    
+
     // Obtener historial actual
     let history = [];
     try {
@@ -29,7 +29,7 @@ export async function saveCommit(message, diff, style, model) {
       // Si no existe, crear nuevo
       history = [];
     }
-    
+
     // Crear entrada
     const entry = {
       id: Date.now(),
@@ -39,22 +39,21 @@ export async function saveCommit(message, diff, style, model) {
       style: style,
       model: model
     };
-    
+
     // Agregar al inicio
     history.unshift(entry);
-    
+
     // Limitar tamaño
     if (history.length > CONFIG.MAX_HISTORY_SIZE) {
       history = history.slice(0, CONFIG.MAX_HISTORY_SIZE);
     }
-    
+
     // Guardar
     await puter.kv.set(CONFIG.STORAGE_KEYS.HISTORY, JSON.stringify(history));
-    
+
     return entry;
   } catch (error) {
-    console.warn(`Advertencia al guardar commit: ${error.message}`);
-    // No lanzar error, solo advertencia
+    // Silenciar error - storage no es crítico
     return null;
   }
 }
@@ -65,18 +64,17 @@ export async function saveCommit(message, diff, style, model) {
 export async function getHistory(limit = 10) {
   try {
     if (!puter) {
-      throw new Error('Storage no inicializado');
+      return [];
     }
-    
+
     const stored = await puter.kv.get(CONFIG.STORAGE_KEYS.HISTORY);
     if (!stored) {
       return [];
     }
-    
+
     const history = JSON.parse(stored);
     return history.slice(0, limit);
   } catch (error) {
-    console.warn(`Advertencia al obtener historial: ${error.message}`);
     return [];
   }
 }
@@ -87,18 +85,17 @@ export async function getHistory(limit = 10) {
 export async function getCommit(id) {
   try {
     if (!puter) {
-      throw new Error('Storage no inicializado');
+      return null;
     }
-    
+
     const stored = await puter.kv.get(CONFIG.STORAGE_KEYS.HISTORY);
     if (!stored) {
       return null;
     }
-    
+
     const history = JSON.parse(stored);
     return history.find(entry => entry.id === id) || null;
   } catch (error) {
-    console.warn(`Advertencia al obtener commit: ${error.message}`);
     return null;
   }
 }
@@ -109,13 +106,12 @@ export async function getCommit(id) {
 export async function clearHistory() {
   try {
     if (!puter) {
-      throw new Error('Storage no inicializado');
+      return false;
     }
-    
+
     await puter.kv.set(CONFIG.STORAGE_KEYS.HISTORY, JSON.stringify([]));
     return true;
   } catch (error) {
-    console.warn(`Advertencia al limpiar historial: ${error.message}`);
     return false;
   }
 }
@@ -126,16 +122,21 @@ export async function clearHistory() {
 export async function getStats() {
   try {
     if (!puter) {
-      throw new Error('Storage no inicializado');
+      return {
+        totalCommits: 0,
+        byStyle: {},
+        byModel: {},
+        lastUsed: null
+      };
     }
-    
+
     let stats = {
       totalCommits: 0,
       byStyle: {},
       byModel: {},
       lastUsed: null
     };
-    
+
     try {
       const stored = await puter.kv.get(CONFIG.STORAGE_KEYS.STATS);
       if (stored) {
@@ -144,11 +145,15 @@ export async function getStats() {
     } catch (e) {
       // Si no existe, usar valores por defecto
     }
-    
+
     return stats;
   } catch (error) {
-    console.warn(`Advertencia al obtener estadísticas: ${error.message}`);
-    return {};
+    return {
+      totalCommits: 0,
+      byStyle: {},
+      byModel: {},
+      lastUsed: null
+    };
   }
 }
 
@@ -158,23 +163,22 @@ export async function getStats() {
 export async function updateStats(style, model) {
   try {
     if (!puter) {
-      throw new Error('Storage no inicializado');
+      return null;
     }
-    
+
     const stats = await getStats();
-    
+
     stats.totalCommits = (stats.totalCommits || 0) + 1;
     stats.byStyle = stats.byStyle || {};
     stats.byStyle[style] = (stats.byStyle[style] || 0) + 1;
     stats.byModel = stats.byModel || {};
     stats.byModel[model] = (stats.byModel[model] || 0) + 1;
     stats.lastUsed = new Date().toISOString();
-    
+
     await puter.kv.set(CONFIG.STORAGE_KEYS.STATS, JSON.stringify(stats));
-    
+
     return stats;
   } catch (error) {
-    console.warn(`Advertencia al actualizar estadísticas: ${error.message}`);
     return null;
   }
 }
@@ -185,9 +189,12 @@ export async function updateStats(style, model) {
 export async function getConfig() {
   try {
     if (!puter) {
-      throw new Error('Storage no inicializado');
+      return {
+        defaultStyle: CONFIG.DEFAULT_STYLE,
+        defaultModel: CONFIG.DEFAULT_MODEL
+      };
     }
-    
+
     const stored = await puter.kv.get(CONFIG.STORAGE_KEYS.CONFIG);
     if (!stored) {
       return {
@@ -195,10 +202,9 @@ export async function getConfig() {
         defaultModel: CONFIG.DEFAULT_MODEL
       };
     }
-    
+
     return JSON.parse(stored);
   } catch (error) {
-    console.warn(`Advertencia al obtener configuración: ${error.message}`);
     return {
       defaultStyle: CONFIG.DEFAULT_STYLE,
       defaultModel: CONFIG.DEFAULT_MODEL
@@ -212,13 +218,12 @@ export async function getConfig() {
 export async function saveConfig(config) {
   try {
     if (!puter) {
-      throw new Error('Storage no inicializado');
+      return false;
     }
-    
+
     await puter.kv.set(CONFIG.STORAGE_KEYS.CONFIG, JSON.stringify(config));
     return true;
   } catch (error) {
-    console.warn(`Advertencia al guardar configuración: ${error.message}`);
     return false;
   }
 }
@@ -229,9 +234,9 @@ export async function saveConfig(config) {
 export async function deleteCommit(id) {
   try {
     if (!puter) {
-      throw new Error('Storage no inicializado');
+      return false;
     }
-    
+
     let history = [];
     try {
       const stored = await puter.kv.get(CONFIG.STORAGE_KEYS.HISTORY);
@@ -241,13 +246,12 @@ export async function deleteCommit(id) {
     } catch (e) {
       return false;
     }
-    
+
     history = history.filter(entry => entry.id !== id);
     await puter.kv.set(CONFIG.STORAGE_KEYS.HISTORY, JSON.stringify(history));
-    
+
     return true;
   } catch (error) {
-    console.warn(`Advertencia al eliminar commit: ${error.message}`);
     return false;
   }
 }
