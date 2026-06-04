@@ -1,12 +1,47 @@
 import { CONFIG } from './config.js';
+import fs from 'fs';
+import path from 'path';
+import os from 'os';
 
-let puter = null;
+// Archivo local para persistencia de historial, stats y config
+// (reemplaza el uso anterior de puter.kv para no depender de autenticación Puter)
+const STORE_FILE = path.join(os.homedir(), '.commit-ai-store.json');
+
+let storeCache = null;
+
+function loadStore() {
+  if (storeCache) return storeCache;
+  try {
+    if (fs.existsSync(STORE_FILE)) {
+      const raw = fs.readFileSync(STORE_FILE, 'utf-8');
+      storeCache = JSON.parse(raw);
+    } else {
+      storeCache = { history: [], stats: {}, config: {} };
+    }
+  } catch (e) {
+    storeCache = { history: [], stats: {}, config: {} };
+  }
+  // Asegurar estructura
+  if (!storeCache.history) storeCache.history = [];
+  if (!storeCache.stats) storeCache.stats = {};
+  if (!storeCache.config) storeCache.config = {};
+  return storeCache;
+}
+
+function saveStore() {
+  try {
+    fs.writeFileSync(STORE_FILE, JSON.stringify(storeCache, null, 2), { mode: 0o600 });
+  } catch (error) {
+    console.warn('No se pudo guardar el store local:', error.message);
+  }
+}
 
 /**
- * Inicializa el módulo de almacenamiento
+ * Inicializa el módulo de almacenamiento (compatibilidad; ahora usa FS local)
  */
 export function initStorage(puterInstance) {
-  puter = puterInstance;
+  // noop - storage ahora es local por defecto
+  // si se quiere resetear cache: storeCache = null;
 }
 
 /**
@@ -14,28 +49,15 @@ export function initStorage(puterInstance) {
  */
 export async function saveCommit(message, diff, style, model) {
   try {
-    if (!puter) {
-      return null;
-    }
-
-    // Obtener historial actual
-    let history = [];
-    try {
-      const stored = await puter.kv.get(CONFIG.STORAGE_KEYS.HISTORY);
-      if (stored) {
-        history = JSON.parse(stored);
-      }
-    } catch (e) {
-      // Si no existe, crear nuevo
-      history = [];
-    }
+    const s = loadStore();
+    let history = s.history || [];
 
     // Crear entrada
     const entry = {
       id: Date.now(),
       timestamp: new Date().toISOString(),
       message: message,
-      diff: diff.substring(0, 500), // Guardar solo primeros 500 chars del diff
+      diff: (diff || '').substring(0, 500),
       style: style,
       model: model
     };
@@ -48,8 +70,8 @@ export async function saveCommit(message, diff, style, model) {
       history = history.slice(0, CONFIG.MAX_HISTORY_SIZE);
     }
 
-    // Guardar
-    await puter.kv.set(CONFIG.STORAGE_KEYS.HISTORY, JSON.stringify(history));
+    s.history = history;
+    saveStore();
 
     return entry;
   } catch (error) {
@@ -63,16 +85,8 @@ export async function saveCommit(message, diff, style, model) {
  */
 export async function getHistory(limit = 10) {
   try {
-    if (!puter) {
-      return [];
-    }
-
-    const stored = await puter.kv.get(CONFIG.STORAGE_KEYS.HISTORY);
-    if (!stored) {
-      return [];
-    }
-
-    const history = JSON.parse(stored);
+    const s = loadStore();
+    const history = s.history || [];
     return history.slice(0, limit);
   } catch (error) {
     return [];
@@ -84,16 +98,8 @@ export async function getHistory(limit = 10) {
  */
 export async function getCommit(id) {
   try {
-    if (!puter) {
-      return null;
-    }
-
-    const stored = await puter.kv.get(CONFIG.STORAGE_KEYS.HISTORY);
-    if (!stored) {
-      return null;
-    }
-
-    const history = JSON.parse(stored);
+    const s = loadStore();
+    const history = s.history || [];
     return history.find(entry => entry.id === id) || null;
   } catch (error) {
     return null;
@@ -105,11 +111,9 @@ export async function getCommit(id) {
  */
 export async function clearHistory() {
   try {
-    if (!puter) {
-      return false;
-    }
-
-    await puter.kv.set(CONFIG.STORAGE_KEYS.HISTORY, JSON.stringify([]));
+    const s = loadStore();
+    s.history = [];
+    saveStore();
     return true;
   } catch (error) {
     return false;
@@ -121,32 +125,13 @@ export async function clearHistory() {
  */
 export async function getStats() {
   try {
-    if (!puter) {
-      return {
-        totalCommits: 0,
-        byStyle: {},
-        byModel: {},
-        lastUsed: null
-      };
-    }
-
-    let stats = {
+    const s = loadStore();
+    return s.stats || {
       totalCommits: 0,
       byStyle: {},
       byModel: {},
       lastUsed: null
     };
-
-    try {
-      const stored = await puter.kv.get(CONFIG.STORAGE_KEYS.STATS);
-      if (stored) {
-        stats = JSON.parse(stored);
-      }
-    } catch (e) {
-      // Si no existe, usar valores por defecto
-    }
-
-    return stats;
   } catch (error) {
     return {
       totalCommits: 0,
@@ -162,11 +147,8 @@ export async function getStats() {
  */
 export async function updateStats(style, model) {
   try {
-    if (!puter) {
-      return null;
-    }
-
-    const stats = await getStats();
+    const s = loadStore();
+    let stats = s.stats || {};
 
     stats.totalCommits = (stats.totalCommits || 0) + 1;
     stats.byStyle = stats.byStyle || {};
@@ -175,7 +157,8 @@ export async function updateStats(style, model) {
     stats.byModel[model] = (stats.byModel[model] || 0) + 1;
     stats.lastUsed = new Date().toISOString();
 
-    await puter.kv.set(CONFIG.STORAGE_KEYS.STATS, JSON.stringify(stats));
+    s.stats = stats;
+    saveStore();
 
     return stats;
   } catch (error) {
@@ -188,22 +171,12 @@ export async function updateStats(style, model) {
  */
 export async function getConfig() {
   try {
-    if (!puter) {
-      return {
-        defaultStyle: CONFIG.DEFAULT_STYLE,
-        defaultModel: CONFIG.DEFAULT_MODEL
-      };
-    }
-
-    const stored = await puter.kv.get(CONFIG.STORAGE_KEYS.CONFIG);
-    if (!stored) {
-      return {
-        defaultStyle: CONFIG.DEFAULT_STYLE,
-        defaultModel: CONFIG.DEFAULT_MODEL
-      };
-    }
-
-    return JSON.parse(stored);
+    const s = loadStore();
+    const cfg = s.config || {};
+    return {
+      defaultStyle: cfg.defaultStyle || CONFIG.DEFAULT_STYLE,
+      defaultModel: cfg.defaultModel || CONFIG.DEFAULT_MODEL
+    };
   } catch (error) {
     return {
       defaultStyle: CONFIG.DEFAULT_STYLE,
@@ -217,11 +190,9 @@ export async function getConfig() {
  */
 export async function saveConfig(config) {
   try {
-    if (!puter) {
-      return false;
-    }
-
-    await puter.kv.set(CONFIG.STORAGE_KEYS.CONFIG, JSON.stringify(config));
+    const s = loadStore();
+    s.config = { ...(s.config || {}), ...config };
+    saveStore();
     return true;
   } catch (error) {
     return false;
@@ -233,23 +204,11 @@ export async function saveConfig(config) {
  */
 export async function deleteCommit(id) {
   try {
-    if (!puter) {
-      return false;
-    }
-
-    let history = [];
-    try {
-      const stored = await puter.kv.get(CONFIG.STORAGE_KEYS.HISTORY);
-      if (stored) {
-        history = JSON.parse(stored);
-      }
-    } catch (e) {
-      return false;
-    }
-
+    const s = loadStore();
+    let history = s.history || [];
     history = history.filter(entry => entry.id !== id);
-    await puter.kv.set(CONFIG.STORAGE_KEYS.HISTORY, JSON.stringify(history));
-
+    s.history = history;
+    saveStore();
     return true;
   } catch (error) {
     return false;

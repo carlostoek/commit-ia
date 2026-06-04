@@ -4,6 +4,46 @@ import ora from 'ora';
 import { COMMIT_STYLES, MODELS } from './config.js';
 
 /**
+ * Formatea un mensaje de commit (puede ser string o objeto {title, body, fullMessage, model})
+ * a una cadena para mostrar o guardar.
+ */
+export function formatCommitMessage(message) {
+  if (typeof message === 'object' && message !== null) {
+    if (message.fullMessage) {
+      return message.fullMessage;
+    }
+    if (message.title) {
+      return message.body 
+        ? `${message.title}\n\n${message.body}` 
+        : message.title;
+    }
+    return JSON.stringify(message);
+  }
+  return String(message || '').trim();
+}
+
+/**
+ * Muestra un preview enriquecido del mensaje de commit (título + cuerpo si existe).
+ * Usado en el paso final de confirmación en modo interactivo.
+ */
+export function showCommitPreview(message) {
+  if (typeof message === 'object' && message !== null && message.title) {
+    console.log(chalk.green(message.title));
+    if (message.body) {
+      console.log(chalk.gray('---'));
+      console.log(chalk.green(message.body));
+    }
+    if (message.model) {
+      console.log(chalk.gray('---'));
+      console.log(chalk.gray(`Modelo: ${message.model}`));
+    }
+  } else {
+    const formatted = formatCommitMessage(message);
+    console.log(chalk.green(formatted));
+  }
+}
+
+/**
  * Selecciona un estilo de commit
  */
 export async function selectStyle(defaultStyle = 'conventional') {
@@ -58,12 +98,13 @@ export async function selectModel(defaultModel = 'openrouter/free') {
  * Edita un mensaje de commit
  */
 export async function editMessage(currentMessage) {
+  const defaultMessage = formatCommitMessage(currentMessage);
   const answer = await inquirer.prompt([
     {
       type: 'editor',
       name: 'message',
       message: '✏️  Edita el mensaje de commit:',
-      default: currentMessage,
+      default: defaultMessage,
       postfix: '.md'
     }
   ]);
@@ -87,7 +128,7 @@ export async function confirmCommit(message, summary) {
   }
   
   console.log('\n' + chalk.bold('Mensaje de commit:'));
-  console.log(chalk.green(message));
+  showCommitPreview(message);
   console.log('\n' + chalk.cyan('═'.repeat(60)) + '\n');
   
   const answer = await inquirer.prompt([
@@ -122,7 +163,8 @@ export async function showHistory(history) {
   
   history.forEach((entry, index) => {
     const date = new Date(entry.timestamp).toLocaleString();
-    console.log(chalk.bold(`${index + 1}. ${entry.message}`));
+    const msgDisplay = formatCommitMessage(entry.message).split('\n')[0]; // solo título para el listado
+    console.log(chalk.bold(`${index + 1}. ${msgDisplay}`));
     console.log(chalk.gray(`   Estilo: ${entry.style} | Modelo: ${entry.model}`));
     console.log(chalk.gray(`   Fecha: ${date}\n`));
   });

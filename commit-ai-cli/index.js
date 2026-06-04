@@ -80,20 +80,7 @@ async function nonInteractiveCommitMode(cliArgs) {
     // Mostrar mensaje
     console.log('\n' + chalk.cyan('═'.repeat(60)));
     console.log(chalk.bold('Mensaje de commit:'));
-    if (typeof message === 'object' && message.fullMessage) {
-      console.log(chalk.green(message.title));
-      if (message.body) {
-        console.log(chalk.gray('---'));
-        console.log(chalk.green(message.body));
-      }
-      // Mostrar modelo usado
-      if (message.model) {
-        console.log(chalk.gray('---'));
-        console.log(chalk.gray(`Modelo: ${message.model}`));
-      }
-    } else {
-      console.log(chalk.green(message));
-    }
+    interactive.showCommitPreview(message);
     console.log(chalk.cyan('═'.repeat(60)) + '\n');
 
     // Ejecutar commit
@@ -147,11 +134,9 @@ async function nonInteractivePRMode(cliArgs) {
     const spinner = interactive.createSpinner('Conectando con OpenRouter...');
     spinner.start();
 
-    let puter;
     try {
-      puter = await ai.initPuter();
-      storage.initStorage(puter);
-      spinner.succeed('Conectado con Puter ✓');
+      await ai.initPuter();
+      spinner.succeed('Conectado con OpenRouter ✓');
     } catch (error) {
       spinner.fail('Error al conectar con OpenRouter');
       interactive.showError(error.message);
@@ -182,7 +167,7 @@ async function nonInteractivePRMode(cliArgs) {
 
     let prContent;
     try {
-      prContent = await pr.generatePRContent(diff, puter, model);
+      prContent = await pr.generatePRContent(diff, model);
       spinner3.succeed('Contenido de PR generado ✓');
     } catch (error) {
       spinner3.fail('Error al generar contenido de PR');
@@ -464,8 +449,8 @@ async function interactivePRFlow(savedConfig, storage) {
     throw error;
   }
 
-  // Obtener puter
-  const puter = await ai.initPuter();
+  // Inicializar OpenRouter (para generación de PR)
+  await ai.initPuter();
 
   // Seleccionar modelo
   const changeModel = await inquirer.prompt([
@@ -501,7 +486,7 @@ async function interactivePRFlow(savedConfig, storage) {
 
   let prContent;
   try {
-    prContent = await pr.generatePRContent(diff, puter, model);
+    prContent = await pr.generatePRContent(diff, model);
     spinner3.succeed('Contenido de PR generado ✓');
   } catch (error) {
     spinner3.fail('Error al generar contenido de PR');
@@ -593,9 +578,7 @@ async function interactivePRFlow(savedConfig, storage) {
  */
 async function showHistoryMode() {
   try {
-    const puter = await ai.initPuter();
-    storage.initStorage(puter);
-
+    // Storage ahora es local, no requiere init de IA ni Puter
     const history = await storage.getHistory(20);
     interactive.showHistory(history);
   } catch (error) {
@@ -609,9 +592,7 @@ async function showHistoryMode() {
  */
 async function showStatsMode() {
   try {
-    const puter = await ai.initPuter();
-    storage.initStorage(puter);
-
+    // Storage ahora es local, no requiere init de IA ni Puter
     const stats = await storage.getStats();
     interactive.showStats(stats);
   } catch (error) {

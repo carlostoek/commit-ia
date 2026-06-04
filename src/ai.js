@@ -102,7 +102,7 @@ export function isOpenRouterInitialized() {
 /**
  * Realiza una llamada a la API de OpenRouter
  */
-async function callOpenRouter(messages, model = null, maxTokens = null, temperature = null) {
+export async function callOpenRouter(messages, model = null, maxTokens = null, temperature = null) {
   const selectedModel = model || CONFIG.DEFAULT_MODEL;
   const selectedMaxTokens = maxTokens || CONFIG.MAX_TOKENS;
   const selectedTemperature = temperature !== null ? temperature : CONFIG.TEMPERATURE;

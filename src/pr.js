@@ -1,11 +1,23 @@
 import { CONFIG } from './config.js';
+import { callOpenRouter, initOpenRouter, isOpenRouterInitialized } from './ai.js';
 
 /**
  * Genera título y descripción de PR basado en cambios
  */
-export async function generatePRContent(diff, puter, model = null) {
+export async function generatePRContent(diff, puterOrModel = null, model = null) {
   try {
-    const selectedModel = model || CONFIG.DEFAULT_MODEL;
+    // Soportar firma antigua (diff, puter, model) y nueva (diff, model)
+    let selectedModel = model || CONFIG.DEFAULT_MODEL;
+    if (typeof puterOrModel === 'string' && !model) {
+      selectedModel = puterOrModel;
+    } else if (model) {
+      selectedModel = model;
+    }
+
+    // Asegurar que OpenRouter está inicializado (apiKey cargada)
+    if (!isOpenRouterInitialized()) {
+      await initOpenRouter();
+    }
 
     const prompt = `Analiza los siguientes cambios de Git y genera un título y descripción profesional para un Pull Request en GitHub.
 
@@ -19,17 +31,28 @@ DESCRIPCIÓN: [descripción detallada del PR, máximo 500 caracteres, puede incl
 El título debe ser descriptivo pero conciso.
 La descripción debe explicar qué cambios se hacen y por qué.`;
 
-    const response = await puter.ai.chat(prompt, {
-      model: selectedModel,
-      max_tokens: 300,
-      temperature: 0.7
-    });
+    const messages = [
+      {
+        role: 'system',
+        content: 'Eres un asistente especializado en generar títulos y descripciones de Pull Requests para GitHub.'
+      },
+      {
+        role: 'user',
+        content: prompt
+      }
+    ];
 
-    const content = response.message.content.toString().trim();
+    const response = await callOpenRouter(messages, selectedModel, 400, 0.7);
+
+    const content = (response.content || '').trim();
+
+    if (!content) {
+      throw new Error('La IA no generó contenido de PR válido.');
+    }
 
     // Parsear la respuesta
-    const titleMatch = content.match(/TÍTULO:\s*(.+?)(?:\n|$)/);
-    const descriptionMatch = content.match(/DESCRIPCIÓN:\s*(.+?)(?:\n|$)/s);
+    const titleMatch = content.match(/TÍTULO:\s*(.+?)(?:\n|$)/i);
+    const descriptionMatch = content.match(/DESCRIPCIÓN:\s*(.+?)(?:\n|$)/is);
 
     const title = titleMatch ? titleMatch[1].trim() : 'New PR';
     const description = descriptionMatch ? descriptionMatch[1].trim() : 'PR description';
@@ -37,7 +60,8 @@ La descripción debe explicar qué cambios se hacen y por qué.`;
     return {
       title: title.substring(0, 60),
       description: description.substring(0, 500),
-      fullContent: content
+      fullContent: content,
+      model: response.model
     };
   } catch (error) {
     throw new Error(`Error al generar contenido de PR: ${error.message}`);

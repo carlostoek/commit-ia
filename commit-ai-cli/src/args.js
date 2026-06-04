@@ -241,7 +241,7 @@ CONFIGURACIÓN:
   La configuración se guarda automáticamente cuando usas modo interactivo.
   Las opciones guardadas se usan como defaults en modo no interactivo.
 
-  Archivo de configuración: ~/.puter/commit-ai-config.json (en la nube)
+  Archivo de configuración/historial: ~/.commit-ai-store.json (local)
 
 MODO NO INTERACTIVO (por defecto):
   
