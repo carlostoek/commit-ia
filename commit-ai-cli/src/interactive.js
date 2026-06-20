@@ -1,7 +1,7 @@
 import inquirer from 'inquirer';
 import chalk from 'chalk';
 import ora from 'ora';
-import { COMMIT_STYLES, MODELS } from './config.js';
+import { COMMIT_STYLES, MODELS_BY_PROVIDER, PROVIDERS } from './config.js';
 
 /**
  * Formatea un mensaje de commit (puede ser string o objeto {title, body, fullMessage, model})
@@ -33,9 +33,13 @@ export function showCommitPreview(message) {
       console.log(chalk.gray('---'));
       console.log(chalk.green(message.body));
     }
-    if (message.model) {
+    if (message.provider || message.model) {
       console.log(chalk.gray('---'));
-      console.log(chalk.gray(`Modelo: ${message.model}`));
+      const providerLabel = message.provider
+        ? PROVIDERS[message.provider]?.name || message.provider
+        : null;
+      const details = [providerLabel, message.model].filter(Boolean).join(' / ');
+      console.log(chalk.gray(`Proveedor: ${details}`));
     }
   } else {
     const formatted = formatCommitMessage(message);
@@ -66,31 +70,68 @@ export async function selectStyle(defaultStyle = 'conventional') {
 }
 
 /**
- * Selecciona un modelo de IA
+ * Selecciona un proveedor de IA
  */
-export async function selectModel(defaultModel = 'openrouter/free') {
-  const allModels = [
-    new inquirer.Separator(chalk.green('🆓 MODELOS GRATUITOS (Recomendados)')),
-    ...MODELS.free,
-    new inquirer.Separator('─────────────────'),
-    new inquirer.Separator(chalk.yellow('💰 Modelos de Pago')),
-    ...MODELS.fast,
-    new inquirer.Separator('─────────────────'),
-    ...MODELS.balanced,
-    new inquirer.Separator('─────────────────'),
-    ...MODELS.powerful
-  ];
-  
+export async function selectProvider(defaultProvider = 'openrouter') {
+  const choices = Object.values(PROVIDERS).map(provider => ({
+    name: provider.id === 'deepseek'
+      ? `${provider.name} (deepseek-v4-flash)`
+      : `${provider.name} (modelos gratuitos y de pago)`,
+    value: provider.id
+  }));
+
+  const answer = await inquirer.prompt([
+    {
+      type: 'list',
+      name: 'provider',
+      message: '🔌 Selecciona el proveedor de IA:',
+      choices,
+      default: defaultProvider
+    }
+  ]);
+
+  return answer.provider;
+}
+
+/**
+ * Selecciona un modelo de IA para un proveedor
+ */
+export async function selectModel(defaultModel = 'openrouter/free', provider = 'openrouter') {
+  const providerModels = MODELS_BY_PROVIDER[provider] || MODELS_BY_PROVIDER.openrouter;
+  const allModels = [];
+
+  if (provider === 'openrouter') {
+    allModels.push(
+      new inquirer.Separator(chalk.green('🆓 MODELOS GRATUITOS (Recomendados)')),
+      ...providerModels.free,
+      new inquirer.Separator('─────────────────'),
+      new inquirer.Separator(chalk.yellow('💰 Modelos de Pago')),
+      ...providerModels.fast,
+      new inquirer.Separator('─────────────────'),
+      ...providerModels.balanced,
+      new inquirer.Separator('─────────────────'),
+      ...providerModels.powerful
+    );
+  } else if (provider === 'deepseek') {
+    allModels.push(
+      new inquirer.Separator(chalk.cyan('⚡ MODELOS DEEPSEEK')),
+      ...providerModels.recommended
+    );
+  } else {
+    const flatModels = Object.values(providerModels).flat();
+    allModels.push(...flatModels);
+  }
+
   const answer = await inquirer.prompt([
     {
       type: 'list',
       name: 'model',
-      message: '🤖 Selecciona el modelo de IA:',
+      message: `🤖 Selecciona el modelo de IA (${PROVIDERS[provider]?.name || provider}):`,
       choices: allModels,
       default: defaultModel
     }
   ]);
-  
+
   return answer.model;
 }
 
@@ -165,7 +206,11 @@ export async function showHistory(history) {
     const date = new Date(entry.timestamp).toLocaleString();
     const msgDisplay = formatCommitMessage(entry.message).split('\n')[0]; // solo título para el listado
     console.log(chalk.bold(`${index + 1}. ${msgDisplay}`));
-    console.log(chalk.gray(`   Estilo: ${entry.style} | Modelo: ${entry.model}`));
+    const providerName = entry.provider
+      ? (PROVIDERS[entry.provider]?.name || entry.provider)
+      : null;
+    const providerLabel = providerName ? `${providerName} / ` : '';
+    console.log(chalk.gray(`   Estilo: ${entry.style} | Proveedor: ${providerLabel}${entry.model}`));
     console.log(chalk.gray(`   Fecha: ${date}\n`));
   });
   
@@ -189,6 +234,14 @@ export async function showStats(stats) {
     });
   }
   
+  if (stats.byProvider && Object.keys(stats.byProvider).length > 0) {
+    console.log(chalk.bold('\nPor proveedor:'));
+    Object.entries(stats.byProvider).forEach(([provider, count]) => {
+      const providerName = PROVIDERS[provider]?.name || provider;
+      console.log(chalk.gray(`  • ${providerName}: ${count}`));
+    });
+  }
+
   if (stats.byModel && Object.keys(stats.byModel).length > 0) {
     console.log(chalk.bold('\nPor modelo:'));
     Object.entries(stats.byModel).forEach(([model, count]) => {
@@ -336,7 +389,7 @@ export function showWelcomeBanner() {
 ║        🤖 Commit AI CLI - Generador de Commits IA         ║
 ║                                                            ║
 ║  Genera automáticamente mensajes de commit usando IA      ║
-║  Potenciado por OpenRouter (Modelos Gratuitos)            ║
+║  OpenRouter & DeepSeek (deepseek-v4-flash)                ║
 ║                                                            ║
 ╚════════════════════════════════════════════════════════════╝
   `));

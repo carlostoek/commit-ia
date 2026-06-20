@@ -7,7 +7,7 @@ Generador automático de mensajes de commit usando IA. Perfecto para trabajar en
 - **Dos modos de operación**:
   - 🤖 **Modo no interactivo** (por defecto): Genera commits automáticamente con configuración guardada
   - 💬 **Modo interactivo** (`-i`): Menús para seleccionar Commit, PR, Historial, Estadísticas
-- **Generación automática de commits** con IA (Puter.js)
+- **Generación automática de commits** con IA (OpenRouter y DeepSeek)
 - **Generación automática de PRs** para GitHub con título y descripción
 - **3 estilos predefinidos de commits**:
   - Conventional Commits (`feat(scope): description`)
@@ -17,7 +17,7 @@ Generador automático de mensajes de commit usando IA. Perfecto para trabajar en
 - **Configuración persistente**: Se guarda automáticamente en modo interactivo
 - **Historial de commits** generados
 - **Estadísticas de uso**
-- **Almacenamiento en la nube** con Puter.js
+- **Almacenamiento local** de historial y configuración
 - **Compatible con scripts** y automatización
 - **Integración con GitHub**: Genera PRs con URL lista para crear
 - **Soporte para Termux** en dispositivos móviles
@@ -26,8 +26,44 @@ Generador automático de mensajes de commit usando IA. Perfecto para trabajar en
 
 - **Node.js 22+** (o superior)
 - **Git** instalado
-- **Cuenta en Puter.com** (gratuita)
+- **API key** de OpenRouter y/o DeepSeek (ver sección Proveedores)
 - **Cambios staged** en Git (`git add` antes de ejecutar)
+
+## 🔌 Proveedores de IA
+
+Commit AI CLI soporta dos proveedores:
+
+| Proveedor | Modelo recomendado | Variable de entorno | Archivo local |
+|-----------|-------------------|---------------------|---------------|
+| **OpenRouter** (por defecto) | `openrouter/free` | `OPENROUTER_API_KEY` | `~/.commit-ai-openrouter-key` |
+| **DeepSeek** | `deepseek-v4-flash` | `DEEPSEEK_API_KEY` | `~/.commit-ai-deepseek-key` |
+
+### Configurar OpenRouter
+
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+# Obtén una key en: https://openrouter.ai/keys
+```
+
+### Configurar DeepSeek
+
+```bash
+export DEEPSEEK_API_KEY="sk-..."
+# Obtén una key en: https://platform.deepseek.com/api_keys
+```
+
+### Seleccionar proveedor
+
+```bash
+# No interactivo
+commit-ai --provider deepseek -m deepseek-v4-flash
+
+# Interactivo (también acepta --provider como default)
+commit-ai -i --provider deepseek
+
+# Variable de entorno para proveedor por defecto
+export DEFAULT_PROVIDER=deepseek
+```
 
 ## 🚀 Instalación
 
@@ -181,8 +217,9 @@ commit-ai --interactive
 commit-ai -s emoji
 commit-ai --style conventional
 
-# Especificar modelo
-commit-ai -m gpt-5.4
+# Especificar proveedor y modelo
+commit-ai -p openrouter -m gpt-5.4
+commit-ai --provider deepseek -m deepseek-v4-flash
 commit-ai --model claude-3.5-sonnet
 
 # Ejecutar sin confirmación
@@ -269,28 +306,43 @@ chore: description
 
 ## 🤖 Modelos de IA Disponibles
 
-### Rápidos (Recomendado para Termux)
-- GPT-5.4 Nano
-- Gemini 2.5 Flash
-- Claude 3.5 Haiku
+### OpenRouter (por defecto)
 
-### Balanceados
-- GPT-5.4
-- Claude 3.5 Sonnet
-- Gemini 2.0 Flash
+Modelos gratuitos y de pago vía OpenRouter. También puedes usar cualquier ID de modelo soportado por OpenRouter con `-m`.
 
-### Potentes
-- GPT-5.2 Chat
-- Claude 3 Opus
+| Categoría | Ejemplos |
+|-----------|----------|
+| **Gratuito** | `openrouter/free` (recomendado) |
+| **Rápidos** | `gpt-5.4-nano`, `gemini-2.5-flash`, `claude-3.5-haiku` |
+| **Balanceados** | `gpt-5.4`, `claude-3.5-sonnet`, `gemini-2.0-flash` |
+| **Potentes** | `gpt-5.2-chat`, `claude-3-opus` |
+
+### DeepSeek
+
+| Modelo | ID | Notas |
+|--------|-----|-------|
+| **DeepSeek V4 Flash** | `deepseek-v4-flash` | Rápido, recomendado para DeepSeek |
+
+```bash
+commit-ai --provider deepseek -m deepseek-v4-flash
+```
 
 ## 💾 Configuración Persistente
 
 ### Cómo Funciona
 
 1. **Primera vez**: Usas modo interactivo (`commit-ai -i`)
-2. **Seleccionas**: Estilo y modelo
-3. **Se guarda**: Automáticamente en tu cuenta Puter
+2. **Seleccionas**: Proveedor, estilo y modelo
+3. **Se guarda**: Localmente en `~/.commit-ai-store.json`
 4. **Próximas veces**: Modo no interactivo usa esos valores
+
+### Archivos locales
+
+| Archivo | Contenido |
+|---------|-----------|
+| `~/.commit-ai-store.json` | Configuración, historial y estadísticas |
+| `~/.commit-ai-openrouter-key` | API key de OpenRouter (opcional) |
+| `~/.commit-ai-deepseek-key` | API key de DeepSeek (opcional) |
 
 ### Cambiar Configuración
 
@@ -300,7 +352,7 @@ commit-ai -i
 
 # O especificar directamente
 commit-ai -s emoji
-commit-ai -m claude-3.5-sonnet
+commit-ai -p deepseek -m deepseek-v4-flash
 ```
 
 ## 📚 Historial
@@ -319,7 +371,7 @@ commit-ai -i
 El historial incluye:
 - Mensaje de commit
 - Estilo utilizado
-- Modelo de IA usado
+- Proveedor y modelo de IA usados
 - Fecha y hora
 
 ## 📊 Estadísticas
@@ -338,6 +390,7 @@ commit-ai -i
 Incluye:
 - Total de commits generados
 - Distribución por estilo
+- Distribución por proveedor
 - Distribución por modelo
 - Último uso
 
@@ -403,39 +456,53 @@ git push origin main
 
 ### Variables de Entorno
 
-Crea un archivo `.env` en la raíz del proyecto:
+Crea un archivo `.env` en la raíz del proyecto (se carga automáticamente al iniciar):
 
 ```env
-# Token de Puter (opcional, usa browser auth por defecto)
-PUTER_AUTH_TOKEN=your-token-here
+# API key de OpenRouter (proveedor por defecto)
+OPENROUTER_API_KEY=sk-or-v1-...
+
+# API key de DeepSeek
+DEEPSEEK_API_KEY=sk-...
+
+# Proveedor por defecto (openrouter, deepseek)
+DEFAULT_PROVIDER=openrouter
 
 # Modelo por defecto
-DEFAULT_MODEL=gpt-5.4-nano
+DEFAULT_MODEL=openrouter/free
 
-# Estilo por defecto
+# Estilo por defecto (conventional, emoji, descriptive)
 DEFAULT_STYLE=conventional
 
 # Modo debug
 DEBUG=false
 ```
 
+También puedes exportar las variables en tu shell o guardar las API keys en los archivos locales (`~/.commit-ai-*-key`). Las variables de entorno tienen prioridad sobre los archivos locales.
+
 ### Primeros Pasos
 
 La primera vez que ejecutes la CLI:
 
-1. Se abrirá tu navegador automáticamente
-2. Inicia sesión en Puter.com
-3. Autoriza el acceso
-4. La CLI continuará automáticamente
+1. Configura al menos una API key (OpenRouter o DeepSeek)
+2. Ejecuta `commit-ai -i` para elegir proveedor, estilo y modelo
+3. La configuración se guarda en `~/.commit-ai-store.json`
 
-Después de esto, la autenticación se guarda localmente.
+```bash
+export OPENROUTER_API_KEY="sk-or-v1-..."
+# o
+export DEEPSEEK_API_KEY="sk-..."
+
+commit-ai -i
+```
 
 ## 🔐 Seguridad
 
-- Los tokens de autenticación se manejan de forma segura
-- Los commits se guardan en tu cuenta de Puter (privado)
-- No se envían datos a servidores externos más allá de Puter
-- Puedes usar variables de entorno para tokens sensibles
+- Las API keys se leen desde variables de entorno o archivos locales con permisos `600`
+- Los archivos de key con permisos demasiado abiertos son rechazados
+- El historial y la configuración se guardan localmente en `~/.commit-ai-store.json`
+- Los diffs se envían al proveedor de IA seleccionado (OpenRouter o DeepSeek) para generar mensajes
+- No hardcodees API keys en el repositorio; usa `.env` (añadido a `.gitignore`) o variables de entorno
 
 ## 🐛 Solución de Problemas
 
@@ -454,10 +521,11 @@ git add archivo.js
 git add .
 ```
 
-### "Error al conectar con Puter"
+### "Error al conectar con OpenRouter" / "Error al conectar con DeepSeek"
 - Verifica tu conexión a internet
-- Asegúrate de tener una cuenta en puter.com
-- Intenta cerrar y abrir la CLI nuevamente
+- Comprueba que la API key esté configurada: `echo $OPENROUTER_API_KEY` o `echo $DEEPSEEK_API_KEY`
+- Verifica el archivo local: `~/.commit-ai-openrouter-key` o `~/.commit-ai-deepseek-key`
+- Obtén una nueva key en [openrouter.ai/keys](https://openrouter.ai/keys) o [platform.deepseek.com](https://platform.deepseek.com/api_keys)
 
 ### "El editor no se abre"
 - En Termux, asegúrate de tener `nano` o `vi` instalado
@@ -500,10 +568,10 @@ commit-ai
 
 ### Tips para Termux
 
-- **Primera vez**: Usa `commit-ai -i` para configurar
+- **Primera vez**: Usa `commit-ai -i` para configurar proveedor y modelo
 - **Próximas veces**: Solo `commit-ai` (modo no interactivo)
-- Usa modelos rápidos (Nano) para mejor rendimiento
-- El almacenamiento en la nube (Puter) sincroniza automáticamente
+- Usa `openrouter/free` o `deepseek-v4-flash` para mejor rendimiento
+- La configuración se guarda localmente en el dispositivo
 - Puedes usar SSH para clonar repositorios
 - Los commits se ejecutan normalmente con Git
 - Perfecto para automatización en scripts
@@ -536,7 +604,8 @@ Este proyecto está bajo la licencia MIT. Ver archivo `LICENSE` para más detall
 
 ## 🙏 Agradecimientos
 
-- [Puter.js](https://puter.com) - Plataforma de IA y almacenamiento en la nube
+- [OpenRouter](https://openrouter.ai) - Acceso unificado a múltiples modelos de IA
+- [DeepSeek](https://www.deepseek.com) - Modelos de IA de alto rendimiento
 - [Inquirer.js](https://github.com/SBoudrias/Inquirer.js) - Interfaz interactiva
 - [Chalk](https://github.com/chalk/chalk) - Colores en terminal
 - [Simple-Git](https://github.com/steveukx/git-js) - Interfaz Git

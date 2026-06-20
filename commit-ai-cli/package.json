@@ -1,7 +1,7 @@
 {
   "name": "commit-ai-cli",
   "version": "1.0.0",
-  "description": "CLI para generar automáticamente mensajes de commit usando IA (OpenRouter)",
+  "description": "CLI para generar automáticamente mensajes de commit usando IA (OpenRouter y DeepSeek)",
   "type": "module",
   "main": "index.js",
   "bin": {
@@ -18,8 +18,8 @@
     "ai",
     "cli",
     "openrouter",
-    "termux",
-    "free-models"
+    "deepseek",
+    "termux"
   ],
   "author": "",
   "license": "MIT",

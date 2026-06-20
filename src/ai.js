@@ -1,49 +1,131 @@
-import { CONFIG, COMMIT_STYLES } from './config.js';
+import {
+  CONFIG,
+  COMMIT_STYLES,
+  PROVIDERS,
+  getDefaultModelForProvider,
+  resolveModel,
+  normalizeProvider,
+  isValidProvider
+} from './config.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 
-// Ruta del archivo de API key
-const API_KEY_FILE = path.join(os.homedir(), '.commit-ai-openrouter-key');
+const providerState = {
+  openrouter: { apiKey: null },
+  deepseek: { apiKey: null }
+};
 
-let apiKey = null;
+const keyFileOverrides = {};
 
-/**
- * Guarda la API key en archivo local
- */
-function saveApiKeyLocally(key) {
-  try {
-    fs.writeFileSync(API_KEY_FILE, key, { mode: 0o600 });
-  } catch (error) {
-    console.warn('No se pudo guardar la API key localmente:', error.message);
+function getProviderConfig(provider) {
+  const normalized = normalizeProvider(provider);
+  if (!isValidProvider(normalized)) {
+    throw new Error(`Proveedor no válido: ${provider}. Valores: openrouter, deepseek`);
+  }
+  return PROVIDERS[normalized];
+}
+
+export function getApiKeyFile(provider) {
+  const normalized = normalizeProvider(provider);
+  if (keyFileOverrides[normalized]) {
+    return keyFileOverrides[normalized];
+  }
+  return path.join(os.homedir(), getProviderConfig(normalized).keyFile);
+}
+
+export function setApiKeyFileForTesting(provider, filePath) {
+  keyFileOverrides[normalizeProvider(provider)] = filePath;
+}
+
+export function resetApiKeyFileForTesting() {
+  for (const key of Object.keys(keyFileOverrides)) {
+    delete keyFileOverrides[key];
   }
 }
 
-/**
- * Carga la API key desde archivo local
- */
-function loadApiKeyLocally() {
+function saveApiKeyLocally(provider, key) {
+  const keyFile = getApiKeyFile(provider);
+  fs.writeFileSync(keyFile, key, { mode: 0o600 });
+  fs.chmodSync(keyFile, 0o600);
+
+  const mode = fs.statSync(keyFile).mode & 0o777;
+  if (mode !== 0o600) {
+    throw new Error(`No se pudieron establecer permisos seguros (600) en ${keyFile}`);
+  }
+}
+
+function loadApiKeyLocally(provider) {
   try {
-    if (fs.existsSync(API_KEY_FILE)) {
-      return fs.readFileSync(API_KEY_FILE, 'utf-8').trim();
+    const keyFile = getApiKeyFile(provider);
+    if (!fs.existsSync(keyFile)) {
+      return null;
     }
+
+    const stats = fs.statSync(keyFile);
+    const mode = stats.mode & 0o777;
+    if ((mode & 0o077) !== 0) {
+      throw new Error(
+        `El archivo de API key ${keyFile} tiene permisos inseguros (${mode.toString(8)}).\n` +
+        `Ejecuta: chmod 600 ${keyFile}`
+      );
+    }
+
+    return fs.readFileSync(keyFile, 'utf-8').trim();
   } catch (error) {
-    console.warn('No se pudo cargar la API key localmente:', error.message);
+    if (error.message.includes('permisos inseguros')) {
+      throw error;
+    }
+    console.warn(`No se pudo cargar la API key de ${provider} localmente:`, error.message);
   }
   return null;
 }
 
-/**
- * Obtiene la API key de OpenRouter
- */
-export async function getOpenRouterApiKey() {
-  // Primero revisar variable de entorno
-  if (process.env.OPENROUTER_API_KEY) {
-    return process.env.OPENROUTER_API_KEY;
+function isDebugEnabled() {
+  return process.env.DEBUG === '1' || process.env.DEBUG === 'true';
+}
+
+function formatApiError(status, statusText, errorData, provider) {
+  const providerConfig = getProviderConfig(provider);
+  let message = errorData.error?.message || `Error HTTP ${status}: ${statusText}`;
+
+  if (status === 401 || status === 403) {
+    const keyFile = getApiKeyFile(provider);
+    message +=
+      `\nVerifica tu API key de ${providerConfig.name}:\n` +
+      `  export ${providerConfig.envVar}="sk-..."\n` +
+      `  O guarda la key en: ${keyFile}\n` +
+      `  Obtén una en: ${providerConfig.keyHelpUrl}`;
   }
 
-  // Luego revisar archivo local
-  const savedKey = loadApiKeyLocally();
+  return message;
+}
+
+/**
+ * Parsea campos estructurados TÍTULO/CUERPO/DESCRIPCIÓN de respuestas de IA
+ */
+export function parseStructuredField(content, fieldName) {
+  if (fieldName === 'TÍTULO') {
+    const match = content.match(/TÍTULO:\s*(.+?)(?:\n|$)/i);
+    return match ? match[1].trim() : '';
+  }
+
+  const pattern = new RegExp(`${fieldName}:\\s*([\\s\\S]+)`, 'i');
+  const match = content.match(pattern);
+  return match ? match[1].trim() : '';
+}
+
+/**
+ * Obtiene la API key de un proveedor (env var > archivo local)
+ */
+export async function getProviderApiKey(provider) {
+  const providerConfig = getProviderConfig(provider);
+
+  if (process.env[providerConfig.envVar]) {
+    return process.env[providerConfig.envVar];
+  }
+
+  const savedKey = loadApiKeyLocally(provider);
   if (savedKey) {
     return savedKey;
   }
@@ -52,84 +134,179 @@ export async function getOpenRouterApiKey() {
 }
 
 /**
- * Configura la API key de OpenRouter
+ * Configura la API key de un proveedor
  */
-export async function setOpenRouterApiKey(key) {
-  apiKey = key;
-  saveApiKeyLocally(key);
+export async function setProviderApiKey(provider, key) {
+  getProviderConfig(provider);
+  const normalized = normalizeProvider(provider);
+  providerState[normalized].apiKey = key;
+  saveApiKeyLocally(normalized, key);
 }
 
 /**
- * Inicializa la conexión con OpenRouter
+ * Obtiene la API key de OpenRouter (compatibilidad)
  */
-export async function initOpenRouter() {
-  const debug = process.env.DEBUG === '1' || process.env.DEBUG === 'true';
+export async function getOpenRouterApiKey() {
+  return getProviderApiKey('openrouter');
+}
+
+/**
+ * Configura la API key de OpenRouter (compatibilidad)
+ */
+export async function setOpenRouterApiKey(key) {
+  return setProviderApiKey('openrouter', key);
+}
+
+/**
+ * Obtiene la API key de DeepSeek
+ */
+export async function getDeepSeekApiKey() {
+  return getProviderApiKey('deepseek');
+}
+
+/**
+ * Configura la API key de DeepSeek
+ */
+export async function setDeepSeekApiKey(key) {
+  return setProviderApiKey('deepseek', key);
+}
+
+/**
+ * Inicializa un proveedor de IA.
+ * Nota: no modifica un proveedor activo global; pasa provider explícitamente a callAI.
+ */
+export async function initAI(provider = CONFIG.DEFAULT_PROVIDER) {
+  const debug = isDebugEnabled();
+  const normalized = normalizeProvider(provider);
+  const providerConfig = getProviderConfig(normalized);
 
   try {
-    const key = await getOpenRouterApiKey();
+    const key = await getProviderApiKey(normalized);
 
     if (!key) {
+      const keyFile = getApiKeyFile(normalized);
       throw new Error(
-        'No se encontró API key de OpenRouter.\n' +
-        'Configúrala con: export OPENROUTER_API_KEY="sk-or-v1-..."\n' +
-        'Obtén una gratis en: https://openrouter.ai/keys'
+        `No se encontró API key de ${providerConfig.name}.\n` +
+        `Configúrala con: export ${providerConfig.envVar}="sk-..."\n` +
+        `O guarda la key en: ${keyFile}\n` +
+        `Obtén una en: ${providerConfig.keyHelpUrl}`
       );
     }
 
     if (debug) {
-      console.log('[DEBUG] API key cargada correctamente');
+      console.log(`[DEBUG] API key de ${normalized} cargada correctamente`);
     }
 
-    apiKey = key;
+    providerState[normalized].apiKey = key;
 
     if (debug) {
-      console.log('[DEBUG] OpenRouter inicializado');
+      console.log(`[DEBUG] ${providerConfig.name} inicializado`);
     }
 
     return true;
   } catch (error) {
-    throw new Error(`Error al inicializar OpenRouter: ${error.message}`);
+    const prefix = `Error al inicializar ${providerConfig.name}`;
+    if (error.message.startsWith(prefix) || error.message.includes('No se encontró API key') || error.message.includes('permisos inseguros')) {
+      throw error;
+    }
+    throw new Error(`${prefix}: ${error.message}`);
   }
 }
 
 /**
- * Verifica si OpenRouter está inicializado
+ * Inicializa la conexión con OpenRouter (compatibilidad)
  */
-export function isOpenRouterInitialized() {
-  return apiKey !== null;
+export async function initOpenRouter() {
+  return initAI('openrouter');
 }
 
 /**
- * Realiza una llamada a la API de OpenRouter
+ * Inicializa la conexión con DeepSeek
  */
-export async function callOpenRouter(messages, model = null, maxTokens = null, temperature = null) {
-  const selectedModel = model || CONFIG.DEFAULT_MODEL;
-  const selectedMaxTokens = maxTokens || CONFIG.MAX_TOKENS;
-  const selectedTemperature = temperature !== null ? temperature : CONFIG.TEMPERATURE;
+export async function initDeepSeek() {
+  return initAI('deepseek');
+}
 
-  const debug = process.env.DEBUG === '1' || process.env.DEBUG === 'true';
+/**
+ * Verifica si un proveedor está inicializado
+ */
+export function isProviderInitialized(provider) {
+  const normalized = normalizeProvider(provider);
+  return providerState[normalized]?.apiKey !== null;
+}
+
+/**
+ * Verifica si OpenRouter está inicializado (compatibilidad)
+ */
+export function isOpenRouterInitialized() {
+  return isProviderInitialized('openrouter');
+}
+
+/**
+ * Verifica si DeepSeek está inicializado
+ */
+export function isDeepSeekInitialized() {
+  return isProviderInitialized('deepseek');
+}
+
+export function buildRequestHeaders(provider, apiKey) {
+  const headers = {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json'
+  };
+
+  if (normalizeProvider(provider) === 'openrouter') {
+    headers['HTTP-Referer'] = 'https://commit-ai-cli.local';
+    headers['X-Title'] = 'Commit AI CLI';
+  }
+
+  return headers;
+}
+
+/**
+ * Realiza una llamada a la API del proveedor seleccionado.
+ * Siempre pasa provider explícitamente en options para evitar ambigüedad.
+ */
+export async function callAI(messages, options = {}) {
+  const provider = normalizeProvider(options.provider || CONFIG.DEFAULT_PROVIDER);
+  const providerConfig = getProviderConfig(provider);
+  const modelResolution = resolveModel(options.model, provider);
+  const selectedModel = modelResolution.model;
+  const selectedMaxTokens = options.maxTokens ?? CONFIG.MAX_TOKENS;
+  const selectedTemperature = options.temperature ?? CONFIG.TEMPERATURE;
+  const debug = isDebugEnabled();
+
+  if (!isProviderInitialized(provider)) {
+    await initAI(provider);
+  }
+
+  const apiKey = providerState[provider].apiKey;
 
   if (debug) {
-    console.log('[DEBUG] Enviando petición a OpenRouter...');
+    console.log(`[DEBUG] Enviando petición a ${providerConfig.name}...`);
     console.log(`[DEBUG] Modelo: ${selectedModel}`);
     console.log(`[DEBUG] Mensajes: ${messages.length}`);
   }
 
-  const response = await fetch(`${CONFIG.OPENROUTER_BASE_URL}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      'Authorization': `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://commit-ai-cli.local',
-      'X-Title': 'Commit AI CLI'
-    },
-    body: JSON.stringify({
-      model: selectedModel,
-      messages: messages,
-      max_tokens: selectedMaxTokens,
-      temperature: selectedTemperature
-    })
-  });
+  let response;
+  try {
+    response = await fetch(`${providerConfig.baseUrl}/chat/completions`, {
+      method: 'POST',
+      headers: buildRequestHeaders(provider, apiKey),
+      body: JSON.stringify({
+        model: selectedModel,
+        messages,
+        max_tokens: selectedMaxTokens,
+        temperature: selectedTemperature
+      }),
+      signal: AbortSignal.timeout(CONFIG.TIMEOUT_MS)
+    });
+  } catch (error) {
+    if (error.name === 'TimeoutError' || error.name === 'AbortError') {
+      throw new Error(`La petición a ${providerConfig.name} excedió el tiempo límite (${CONFIG.TIMEOUT_MS}ms)`);
+    }
+    throw error;
+  }
 
   if (debug) {
     console.log(`[DEBUG] Respuesta recibida: HTTP ${response.status}`);
@@ -137,10 +314,7 @@ export async function callOpenRouter(messages, model = null, maxTokens = null, t
 
   if (!response.ok) {
     const errorData = await response.json().catch(() => ({}));
-    throw new Error(
-      errorData.error?.message ||
-      `Error HTTP ${response.status}: ${response.statusText}`
-    );
+    throw new Error(formatApiError(response.status, response.statusText, errorData, provider));
   }
 
   const data = await response.json();
@@ -160,30 +334,54 @@ export async function callOpenRouter(messages, model = null, maxTokens = null, t
   return {
     content: data.choices[0].message.content,
     model: data.model,
-    usage: data.usage
+    usage: data.usage,
+    provider
   };
+}
+
+/**
+ * Realiza una llamada a la API de OpenRouter (compatibilidad)
+ */
+export async function callOpenRouter(messages, model = null, maxTokens = null, temperature = null) {
+  return callAI(messages, {
+    provider: 'openrouter',
+    model: model || CONFIG.DEFAULT_MODEL,
+    maxTokens,
+    temperature
+  });
+}
+
+/**
+ * Realiza una llamada a la API de DeepSeek
+ */
+export async function callDeepSeek(messages, model = null, maxTokens = null, temperature = null) {
+  return callAI(messages, {
+    provider: 'deepseek',
+    model: model || getDefaultModelForProvider('deepseek'),
+    maxTokens,
+    temperature
+  });
 }
 
 /**
  * Genera un mensaje de commit usando IA (título + cuerpo)
  */
-export async function generateCommitMessage(diff, style = 'conventional', model = null) {
+export async function generateCommitMessage(diff, style = 'conventional', model = null, provider = null) {
   try {
-    // Inicializar OpenRouter si no está inicializado
-    if (!isOpenRouterInitialized()) {
-      await initOpenRouter();
+    const selectedProvider = normalizeProvider(provider || CONFIG.DEFAULT_PROVIDER);
+
+    if (!isProviderInitialized(selectedProvider)) {
+      await initAI(selectedProvider);
     }
 
-    // Obtener configuración del estilo
     const styleConfig = COMMIT_STYLES[style];
     if (!styleConfig) {
       throw new Error(`Estilo de commit no válido: ${style}`);
     }
 
-    // Preparar el prompt
     const prompt = styleConfig.prompt.replace('{DIFF}', diff);
+    const modelResolution = resolveModel(model, selectedProvider);
 
-    // Llamar a la API de OpenRouter
     const messages = [
       {
         role: 'system',
@@ -195,51 +393,50 @@ export async function generateCommitMessage(diff, style = 'conventional', model 
       }
     ];
 
-    const response = await callOpenRouter(messages, model);
+    const response = await callAI(messages, {
+      provider: selectedProvider,
+      model: modelResolution.model
+    });
 
-    // Extraer el contenido
     const content = (response.content || '').trim();
 
     if (!content) {
       throw new Error('La IA no generó un mensaje válido.');
     }
 
-    // Parsear título y cuerpo
-    const titleMatch = content.match(/TÍTULO:\s*(.+?)(?:\n|$)/i);
-    const bodyMatch = content.match(/CUERPO:\s*(.+?)(?:\n|$)/is);
+    const title = parseStructuredField(content, 'TÍTULO') || (content.split('\n')[0] || 'Update');
+    let body = parseStructuredField(content, 'CUERPO');
 
-    const title = titleMatch ? titleMatch[1].trim() : (content.split('\n')[0] || 'Update');
-    let body = bodyMatch ? bodyMatch[1].trim() : '';
-
-    // Limpiar el cuerpo si dice "Sin cambios adicionales"
     if (body.toLowerCase().includes('sin cambios adicionales')) {
       body = '';
     }
 
     return {
-      title: title,
-      body: body,
+      title,
+      body,
       fullMessage: body ? `${title}\n\n${body}` : title,
-      model: response.model
+      model: response.model,
+      provider: selectedProvider,
+      modelWarning: modelResolution.warning
     };
   } catch (error) {
-    throw new Error(`Error al generar mensaje de commit: ${error.message}`);
+    const prefix = 'Error al generar mensaje de commit';
+    if (error.message.startsWith(prefix) || error.message.includes('Estilo de commit no válido') || error.message.includes('no generó')) {
+      throw error;
+    }
+    throw new Error(`${prefix}: ${error.message}`);
   }
 }
 
 /**
  * Genera múltiples variaciones de un mensaje de commit
  */
-export async function generateCommitVariations(diff, style = 'conventional', count = 3) {
+export async function generateCommitVariations(diff, style = 'conventional', count = 3, provider = null) {
   try {
     const variations = [];
 
     for (let i = 0; i < count; i++) {
-      const message = await generateCommitMessage(
-        diff,
-        style,
-        null
-      );
+      const message = await generateCommitMessage(diff, style, null, provider);
       variations.push(message);
     }
 
@@ -250,29 +447,32 @@ export async function generateCommitVariations(diff, style = 'conventional', cou
 }
 
 /**
- * Obtiene lista de modelos disponibles
+ * Obtiene lista de modelos disponibles (OpenRouter)
  */
-export async function listAvailableModels() {
+export async function listAvailableModels(provider = 'openrouter') {
+  const normalized = normalizeProvider(provider);
+  if (normalized !== 'openrouter') {
+    return getPredefinedModels(normalized);
+  }
+
   try {
-    if (!isOpenRouterInitialized()) {
-      await initOpenRouter();
+    if (!isProviderInitialized('openrouter')) {
+      await initAI('openrouter');
     }
 
-    // Obtener modelos desde OpenRouter
-    const response = await fetch('https://openrouter.ai/api/v1/models', {
+    const response = await fetch(`${PROVIDERS.openrouter.baseUrl}/models`, {
       headers: {
-        'Authorization': `Bearer ${apiKey}`
-      }
+        'Authorization': `Bearer ${providerState.openrouter.apiKey}`
+      },
+      signal: AbortSignal.timeout(CONFIG.TIMEOUT_MS)
     });
 
     if (!response.ok) {
-      // Si falla, retornar lista predefinida
-      return getPredefinedModels();
+      return getPredefinedModels(normalized);
     }
 
     const data = await response.json();
 
-    // Filtrar modelos gratuitos
     const freeModels = data.data
       .filter(model => {
         const pricing = model.pricing;
@@ -287,40 +487,50 @@ export async function listAvailableModels() {
       }));
 
     if (freeModels.length === 0) {
-      return getPredefinedModels();
+      return getPredefinedModels(normalized);
     }
 
     return freeModels;
   } catch (error) {
-    // Si falla, retornar lista predefinida
-    return getPredefinedModels();
+    return getPredefinedModels(normalized);
   }
 }
 
-/**
- * Retorna lista predefinida de modelos
- */
-function getPredefinedModels() {
+function getPredefinedModels(provider = 'openrouter') {
+  if (normalizeProvider(provider) === 'deepseek') {
+    return [
+      {
+        name: '⚡ DeepSeek V4 Flash (Recomendado)',
+        value: 'deepseek-v4-flash',
+        description: 'Modelo rápido y eficiente de DeepSeek'
+      }
+    ];
+  }
+
   return [
-    { name: '🆓 Auto (Router gratuito - Recomendado)', value: 'openrouter/free', description: 'Elige automáticamente el mejor modelo gratuito disponible' }
+    {
+      name: '🆓 Auto (Router gratuito - Recomendado)',
+      value: 'openrouter/free',
+      description: 'Elige automáticamente el mejor modelo gratuito disponible'
+    }
   ];
 }
 
 /**
  * Valida si un modelo está disponible
  */
-export async function validateModel(model) {
+export async function validateModel(model, provider = CONFIG.DEFAULT_PROVIDER) {
   try {
-    if (!isOpenRouterInitialized()) {
-      await initOpenRouter();
+    const normalized = normalizeProvider(provider);
+    if (!isProviderInitialized(normalized)) {
+      await initAI(normalized);
     }
 
-    // Intentar hacer una llamada de prueba con el modelo
     const messages = [
       { role: 'user', content: 'test' }
     ];
 
-    await callOpenRouter(messages, model, 10);
+    await callAI(messages, { provider: normalized, model, maxTokens: 10 });
     return true;
   } catch (error) {
     return false;
@@ -330,42 +540,67 @@ export async function validateModel(model) {
 /**
  * Obtiene información sobre el uso de la API
  */
-export async function getUsageInfo() {
+export async function getUsageInfo(provider = CONFIG.DEFAULT_PROVIDER) {
+  const normalized = normalizeProvider(provider);
   try {
-    if (!isOpenRouterInitialized()) {
-      await initOpenRouter();
+    if (!isProviderInitialized(normalized)) {
+      await initAI(normalized);
     }
 
     return {
       authenticated: true,
-      apiKeyConfigured: !!apiKey,
+      provider: normalized,
+      apiKeyConfigured: !!providerState[normalized].apiKey,
       timestamp: new Date().toISOString()
     };
   } catch (error) {
     return {
       authenticated: false,
+      provider: normalized,
       error: error.message
     };
   }
 }
 
 /**
- * Cierra la conexión con OpenRouter
+ * Cierra la conexión con un proveedor
  */
-export function closeOpenRouter() {
-  apiKey = null;
+export function closeProvider(provider) {
+  const normalized = normalizeProvider(provider);
+  if (providerState[normalized]) {
+    providerState[normalized].apiKey = null;
+  }
 }
 
 /**
- * Limpia la API key guardada
+ * Cierra la conexión con OpenRouter (compatibilidad)
  */
-export function clearSavedApiKey() {
+export function closeOpenRouter() {
+  closeProvider('openrouter');
+}
+
+/**
+ * Cierra la conexión con DeepSeek
+ */
+export function closeDeepSeek() {
+  closeProvider('deepseek');
+}
+
+/**
+ * Limpia la API key guardada de un proveedor
+ */
+export function clearSavedApiKey(provider = 'openrouter') {
   try {
-    if (fs.existsSync(API_KEY_FILE)) {
-      fs.unlinkSync(API_KEY_FILE);
+    const normalized = normalizeProvider(provider);
+    const keyFile = getApiKeyFile(normalized);
+    if (fs.existsSync(keyFile)) {
+      fs.unlinkSync(keyFile);
+    }
+    if (providerState[normalized]) {
+      providerState[normalized].apiKey = null;
     }
   } catch (error) {
-    console.warn('No se pudo limpiar la API key:', error.message);
+    console.warn(`No se pudo limpiar la API key de ${provider}:`, error.message);
   }
 }
 
@@ -373,4 +608,4 @@ export function clearSavedApiKey() {
 export const initPuter = initOpenRouter;
 export const isPuterInitialized = isOpenRouterInitialized;
 export const closePuter = closeOpenRouter;
-export const clearSavedToken = clearSavedApiKey;
+export const clearSavedToken = () => clearSavedApiKey('openrouter');

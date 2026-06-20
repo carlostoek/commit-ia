@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import './src/load-env.js';
 import chalk from 'chalk';
 import inquirer from 'inquirer';
 import { exec } from 'child_process';
@@ -10,46 +11,68 @@ import * as interactive from './src/interactive.js';
 import * as pr from './src/pr.js';
 import { CLIArgs, showHelpMessage, showVersion } from './src/args.js';
 import { CONFIG, COMMIT_STYLES } from './src/config.js';
+import {
+  resolveProvider,
+  resolveProviderModel,
+  getProviderDisplayName,
+  resolveInteractiveProviderAndModel
+} from './src/provider.js';
+
+function showModelWarning(warning) {
+  if (warning) {
+    interactive.showWarning(warning);
+  }
+}
+
+async function ensureProviderReady(provider) {
+  const spinner = interactive.createSpinner(`Conectando con ${getProviderDisplayName(provider)}...`);
+  spinner.start();
+
+  try {
+    await ai.initAI(provider);
+    spinner.succeed(`Conectado con ${getProviderDisplayName(provider)} ✓`);
+  } catch (error) {
+    spinner.fail(`Error al conectar con ${getProviderDisplayName(provider)}`);
+    throw error;
+  }
+}
+
+function getInteractiveDeps() {
+  return {
+    prompt: (questions) => inquirer.prompt(questions),
+    selectProvider: interactive.selectProvider,
+    selectModel: interactive.selectModel,
+    ensureProviderReady,
+    showWarning: showModelWarning,
+    showError: interactive.showError
+  };
+}
 
 /**
  * Función principal - Modo no interactivo COMMIT (por defecto)
  */
 async function nonInteractiveCommitMode(cliArgs) {
   try {
-    // Verificar si es un repositorio Git
     const isRepo = await git.isGitRepository();
     if (!isRepo) {
       interactive.showError('No estás en un repositorio Git válido.');
       process.exit(1);
     }
 
-    // Inicializar Puter
-    const spinner = interactive.createSpinner('Conectando con OpenRouter...');
-    spinner.start();
-
-    try {
-      await ai.initOpenRouter();
-      spinner.succeed('Conectado con OpenRouter ✓');
-    } catch (error) {
-      spinner.fail('Error al conectar con OpenRouter');
-      interactive.showError(error.message);
-      process.exit(1);
-    }
-
-    // Obtener configuración guardada
     const savedConfig = await storage.getConfig();
-
-    // Determinar estilo y modelo a usar
+    const provider = resolveProvider(cliArgs.getProvider(), savedConfig);
     const style = cliArgs.getStyle() || savedConfig.defaultStyle || CONFIG.DEFAULT_STYLE;
-    const model = cliArgs.getModel() || savedConfig.defaultModel || CONFIG.DEFAULT_MODEL;
+    const modelResult = resolveProviderModel(cliArgs.getModel(), savedConfig, provider);
+    const model = modelResult.model;
 
-    // Validar estilo
+    showModelWarning(modelResult.warning);
+    await ensureProviderReady(provider);
+
     if (!COMMIT_STYLES[style]) {
       interactive.showError(`Estilo de commit no válido: ${style}`);
       process.exit(1);
     }
 
-    // Obtener diff
     const spinner2 = interactive.createSpinner('Obteniendo cambios...');
     spinner2.start();
 
@@ -63,13 +86,13 @@ async function nonInteractiveCommitMode(cliArgs) {
       process.exit(1);
     }
 
-    // Generar mensaje
     const spinner3 = interactive.createSpinner('Generando mensaje con IA...');
     spinner3.start();
 
     let message;
     try {
-      message = await ai.generateCommitMessage(diff, style, model);
+      message = await ai.generateCommitMessage(diff, style, model, provider);
+      showModelWarning(message.modelWarning);
       spinner3.succeed('Mensaje generado ✓');
     } catch (error) {
       spinner3.fail('Error al generar mensaje');
@@ -77,13 +100,11 @@ async function nonInteractiveCommitMode(cliArgs) {
       process.exit(1);
     }
 
-    // Mostrar mensaje
     console.log('\n' + chalk.cyan('═'.repeat(60)));
     console.log(chalk.bold('Mensaje de commit:'));
     interactive.showCommitPreview(message);
     console.log(chalk.cyan('═'.repeat(60)) + '\n');
 
-    // Ejecutar commit
     const spinner4 = interactive.createSpinner('Ejecutando commit...');
     spinner4.start();
 
@@ -91,9 +112,8 @@ async function nonInteractiveCommitMode(cliArgs) {
       await git.executeCommit(message);
       spinner4.succeed('Commit ejecutado ✓');
 
-      // Guardar en historial y actualizar estadísticas
-      await storage.saveCommit(message, diff, style, model);
-      await storage.updateStats(style, model);
+      await storage.saveCommit(message, diff, style, model, provider);
+      await storage.updateStats(style, model, provider);
 
       interactive.showSuccess('¡Commit realizado exitosamente!');
     } catch (error) {
@@ -115,14 +135,12 @@ async function nonInteractiveCommitMode(cliArgs) {
  */
 async function nonInteractivePRMode(cliArgs) {
   try {
-    // Verificar si es un repositorio Git
     const isRepo = await git.isGitRepository();
     if (!isRepo) {
       interactive.showError('No estás en un repositorio Git válido.');
       process.exit(1);
     }
 
-    // Validar requisitos de PR
     try {
       await pr.validatePRRequirements(git);
     } catch (error) {
@@ -130,24 +148,14 @@ async function nonInteractivePRMode(cliArgs) {
       process.exit(1);
     }
 
-    // Inicializar Puter
-    const spinner = interactive.createSpinner('Conectando con OpenRouter...');
-    spinner.start();
-
-    try {
-      await ai.initPuter();
-      spinner.succeed('Conectado con OpenRouter ✓');
-    } catch (error) {
-      spinner.fail('Error al conectar con OpenRouter');
-      interactive.showError(error.message);
-      process.exit(1);
-    }
-
-    // Obtener configuración guardada
     const savedConfig = await storage.getConfig();
-    const model = cliArgs.getModel() || savedConfig.defaultModel || CONFIG.DEFAULT_MODEL;
+    const provider = resolveProvider(cliArgs.getProvider(), savedConfig);
+    const modelResult = resolveProviderModel(cliArgs.getModel(), savedConfig, provider);
+    const model = modelResult.model;
 
-    // Obtener diff
+    showModelWarning(modelResult.warning);
+    await ensureProviderReady(provider);
+
     const spinner2 = interactive.createSpinner('Obteniendo cambios...');
     spinner2.start();
 
@@ -161,13 +169,12 @@ async function nonInteractivePRMode(cliArgs) {
       process.exit(1);
     }
 
-    // Generar contenido de PR
     const spinner3 = interactive.createSpinner('Generando contenido de PR con IA...');
     spinner3.start();
 
     let prContent;
     try {
-      prContent = await pr.generatePRContent(diff, model);
+      prContent = await pr.generatePRContent(diff, null, model, provider);
       spinner3.succeed('Contenido de PR generado ✓');
     } catch (error) {
       spinner3.fail('Error al generar contenido de PR');
@@ -175,10 +182,8 @@ async function nonInteractivePRMode(cliArgs) {
       process.exit(1);
     }
 
-    // Mostrar contenido
     console.log(pr.formatPRContent(prContent));
 
-    // Obtener información del repositorio
     const spinner4 = interactive.createSpinner('Obteniendo información del repositorio...');
     spinner4.start();
 
@@ -192,7 +197,6 @@ async function nonInteractivePRMode(cliArgs) {
       process.exit(1);
     }
 
-    // Construir URL del PR
     const prUrl = pr.buildPRUrl(repoInfo, prContent.title, prContent.description);
 
     console.log(chalk.cyan('═'.repeat(60)));
@@ -200,7 +204,6 @@ async function nonInteractivePRMode(cliArgs) {
     console.log(chalk.blue(prUrl));
     console.log(chalk.cyan('═'.repeat(60)) + '\n');
 
-    // Abrir en navegador si es posible
     if (cliArgs.shouldOpenBrowser()) {
       const spinner5 = interactive.createSpinner('Abriendo en navegador...');
       spinner5.start();
@@ -236,37 +239,19 @@ async function nonInteractivePRMode(cliArgs) {
  */
 async function interactiveMode(cliArgs) {
   try {
-    // Mostrar banner
     interactive.showWelcomeBanner();
 
-    // Verificar si es un repositorio Git
     const isRepo = await git.isGitRepository();
     if (!isRepo) {
       interactive.showError('No estás en un repositorio Git válido.');
       process.exit(1);
     }
 
-    // Obtener información del repositorio
     const repoInfo = await git.getRepositoryInfo();
     interactive.showRepositoryInfo(repoInfo);
 
-    // Inicializar Puter
-    const spinner = interactive.createSpinner('Conectando con OpenRouter...');
-    spinner.start();
-
-    try {
-      await ai.initOpenRouter();
-      spinner.succeed('Conectado con OpenRouter ✓');
-    } catch (error) {
-      spinner.fail('Error al conectar con OpenRouter');
-      interactive.showError(error.message);
-      process.exit(1);
-    }
-
-    // Obtener configuración guardada
     const savedConfig = await storage.getConfig();
 
-    // Menú principal: Commit o PR
     const mainAction = await inquirer.prompt([
       {
         type: 'list',
@@ -299,19 +284,17 @@ async function interactiveMode(cliArgs) {
       process.exit(0);
     }
 
-    // Loop principal para commits o PRs
     let running = true;
     while (running) {
       try {
+        const currentConfig = await storage.getConfig();
+
         if (mainAction.action === 'commit') {
-          // Flujo de commit interactivo
-          await interactiveCommitFlow(savedConfig, storage);
+          await interactiveCommitFlow(cliArgs, currentConfig, storage);
         } else if (mainAction.action === 'pr') {
-          // Flujo de PR interactivo
-          await interactivePRFlow(savedConfig, storage);
+          await interactivePRFlow(cliArgs, currentConfig, storage);
         }
 
-        // Preguntar si continuar
         const continueLoop = await interactive.askContinue();
         if (!continueLoop) {
           running = false;
@@ -322,7 +305,6 @@ async function interactiveMode(cliArgs) {
       }
     }
 
-    // Banner de despedida
     interactive.showGoodbyeBanner();
   } catch (error) {
     interactive.showError(`Error fatal: ${error.message}`);
@@ -336,29 +318,11 @@ async function interactiveMode(cliArgs) {
 /**
  * Flujo interactivo de commit
  */
-async function interactiveCommitFlow(savedConfig, storage) {
-  // Verificar si hay cambios staged
+async function interactiveCommitFlow(cliArgs, savedConfig, storage) {
   const summary = await git.getStagedSummary();
-
-  // Seleccionar estilo
   const style = await interactive.selectStyle(savedConfig.defaultStyle);
+  const { provider, model } = await resolveInteractiveProviderAndModel(cliArgs, savedConfig, getInteractiveDeps());
 
-  // Preguntar si cambiar modelo
-  const changeModel = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'change',
-      message: '¿Deseas seleccionar un modelo diferente?',
-      default: false
-    }
-  ]);
-
-  let model = savedConfig.defaultModel;
-  if (changeModel.change) {
-    model = await interactive.selectModel(savedConfig.defaultModel);
-  }
-
-  // Obtener diff
   const spinner2 = interactive.createSpinner('Obteniendo cambios...');
   spinner2.start();
 
@@ -371,26 +335,23 @@ async function interactiveCommitFlow(savedConfig, storage) {
     throw error;
   }
 
-  // Generar mensaje
   const spinner3 = interactive.createSpinner('Generando mensaje con IA...');
   spinner3.start();
 
   let message;
   try {
-    message = await ai.generateCommitMessage(diff, style, model);
+    message = await ai.generateCommitMessage(diff, style, model, provider);
     spinner3.succeed('Mensaje generado ✓');
   } catch (error) {
     spinner3.fail('Error al generar mensaje');
     throw error;
   }
 
-  // Loop de confirmación
   let confirmed = false;
   while (!confirmed) {
     const action = await interactive.confirmCommit(message, summary);
 
     if (action === 'commit') {
-      // Ejecutar commit
       const spinner4 = interactive.createSpinner('Ejecutando commit...');
       spinner4.start();
 
@@ -398,14 +359,13 @@ async function interactiveCommitFlow(savedConfig, storage) {
         await git.executeCommit(message);
         spinner4.succeed('Commit ejecutado ✓');
 
-        // Guardar en historial y actualizar estadísticas
-        await storage.saveCommit(message, diff, style, model);
-        await storage.updateStats(style, model);
+        await storage.saveCommit(message, diff, style, model, provider);
+        await storage.updateStats(style, model, provider);
 
-        // Guardar configuración
         await storage.saveConfig({
           defaultStyle: style,
-          defaultModel: model
+          defaultModel: model,
+          defaultProvider: provider
         });
 
         interactive.showSuccess('¡Commit realizado exitosamente!');
@@ -416,15 +376,13 @@ async function interactiveCommitFlow(savedConfig, storage) {
         confirmed = true;
       }
     } else if (action === 'edit') {
-      // Editar mensaje
       message = await interactive.editMessage(message);
     } else if (action === 'regenerate') {
-      // Regenerar
       const spinner5 = interactive.createSpinner('Regenerando mensaje...');
       spinner5.start();
 
       try {
-        message = await ai.generateCommitMessage(diff, style, model);
+        message = await ai.generateCommitMessage(diff, style, model, provider);
         spinner5.succeed('Mensaje regenerado ✓');
       } catch (error) {
         spinner5.fail('Error al regenerar');
@@ -441,33 +399,15 @@ async function interactiveCommitFlow(savedConfig, storage) {
 /**
  * Flujo interactivo de PR
  */
-async function interactivePRFlow(savedConfig, storage) {
-  // Validar requisitos de PR
+async function interactivePRFlow(cliArgs, savedConfig, storage) {
   try {
     await pr.validatePRRequirements(git);
   } catch (error) {
     throw error;
   }
 
-  // Inicializar OpenRouter (para generación de PR)
-  await ai.initPuter();
+  const { provider, model } = await resolveInteractiveProviderAndModel(cliArgs, savedConfig, getInteractiveDeps());
 
-  // Seleccionar modelo
-  const changeModel = await inquirer.prompt([
-    {
-      type: 'confirm',
-      name: 'change',
-      message: '¿Deseas seleccionar un modelo diferente?',
-      default: false
-    }
-  ]);
-
-  let model = savedConfig.defaultModel;
-  if (changeModel.change) {
-    model = await interactive.selectModel(savedConfig.defaultModel);
-  }
-
-  // Obtener diff
   const spinner2 = interactive.createSpinner('Obteniendo cambios...');
   spinner2.start();
 
@@ -480,23 +420,25 @@ async function interactivePRFlow(savedConfig, storage) {
     throw error;
   }
 
-  // Generar contenido de PR
   const spinner3 = interactive.createSpinner('Generando contenido de PR con IA...');
   spinner3.start();
 
   let prContent;
   try {
-    prContent = await pr.generatePRContent(diff, model);
+    prContent = await pr.generatePRContent(diff, null, model, provider);
     spinner3.succeed('Contenido de PR generado ✓');
   } catch (error) {
     spinner3.fail('Error al generar contenido de PR');
     throw error;
   }
 
-  // Mostrar contenido
   console.log(pr.formatPRContent(prContent));
 
-  // Preguntar si editar
+  await storage.saveConfig({
+    defaultModel: model,
+    defaultProvider: provider
+  });
+
   const editPR = await inquirer.prompt([
     {
       type: 'confirm',
@@ -529,7 +471,6 @@ async function interactivePRFlow(savedConfig, storage) {
     prContent.description = editedDescription.description;
   }
 
-  // Obtener información del repositorio
   const spinner4 = interactive.createSpinner('Obteniendo información del repositorio...');
   spinner4.start();
 
@@ -542,7 +483,6 @@ async function interactivePRFlow(savedConfig, storage) {
     throw error;
   }
 
-  // Construir URL del PR
   const prUrl = pr.buildPRUrl(repoInfo, prContent.title, prContent.description);
 
   console.log(chalk.cyan('═'.repeat(60)));
@@ -550,7 +490,6 @@ async function interactivePRFlow(savedConfig, storage) {
   console.log(chalk.blue(prUrl));
   console.log(chalk.cyan('═'.repeat(60)) + '\n');
 
-  // Preguntar si abrir en navegador
   const openBrowser = await inquirer.prompt([
     {
       type: 'confirm',
@@ -573,12 +512,8 @@ async function interactivePRFlow(savedConfig, storage) {
   interactive.showSuccess('¡PR listo para crear!');
 }
 
-/**
- * Función para mostrar historial
- */
 async function showHistoryMode() {
   try {
-    // Storage ahora es local, no requiere init de IA ni Puter
     const history = await storage.getHistory(20);
     interactive.showHistory(history);
   } catch (error) {
@@ -587,12 +522,8 @@ async function showHistoryMode() {
   }
 }
 
-/**
- * Función para mostrar estadísticas
- */
 async function showStatsMode() {
   try {
-    // Storage ahora es local, no requiere init de IA ni Puter
     const stats = await storage.getStats();
     interactive.showStats(stats);
   } catch (error) {
@@ -601,15 +532,14 @@ async function showStatsMode() {
   }
 }
 
-/**
- * Función principal
- */
 async function main() {
   try {
-    // Parsear argumentos
     const cliArgs = new CLIArgs();
 
-    // Manejo de flags especiales
+    if (cliArgs.isDebug()) {
+      process.env.DEBUG = '1';
+    }
+
     if (cliArgs.showHelp()) {
       showHelpMessage();
       process.exit(0);
@@ -630,15 +560,11 @@ async function main() {
       process.exit(0);
     }
 
-    // Determinar modo
     if (cliArgs.isInteractive()) {
-      // Modo interactivo
       await interactiveMode(cliArgs);
     } else if (cliArgs.isPR()) {
-      // Modo no interactivo PR
       await nonInteractivePRMode(cliArgs);
     } else {
-      // Modo no interactivo COMMIT (por defecto)
       await nonInteractiveCommitMode(cliArgs);
     }
   } catch (error) {
@@ -647,12 +573,10 @@ async function main() {
   }
 }
 
-// Ejecutar
 main().catch(error => {
   interactive.showError(`Error fatal: ${error.message}`);
   process.exit(1);
 }).finally(() => {
-  // Forzar cierre de todos los procesos después de 500ms
   setTimeout(() => {
     process.exit(0);
   }, 500);

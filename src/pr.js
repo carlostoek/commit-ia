@@ -1,22 +1,30 @@
-import { CONFIG } from './config.js';
-import { callOpenRouter, initOpenRouter, isOpenRouterInitialized } from './ai.js';
+import { CONFIG, resolveModel } from './config.js';
+import { callAI, initAI, isProviderInitialized, parseStructuredField } from './ai.js';
 
 /**
  * Genera título y descripción de PR basado en cambios
  */
-export async function generatePRContent(diff, puterOrModel = null, model = null) {
+export async function generatePRContent(diff, puterOrModel = null, model = null, provider = null) {
   try {
-    // Soportar firma antigua (diff, puter, model) y nueva (diff, model)
+    // Soportar firma antigua (diff, puter, model) y nueva (diff, model, provider)
     let selectedModel = model || CONFIG.DEFAULT_MODEL;
+    let selectedProvider = provider || CONFIG.DEFAULT_PROVIDER;
+
     if (typeof puterOrModel === 'string' && !model) {
       selectedModel = puterOrModel;
     } else if (model) {
       selectedModel = model;
     }
 
-    // Asegurar que OpenRouter está inicializado (apiKey cargada)
-    if (!isOpenRouterInitialized()) {
-      await initOpenRouter();
+    if (provider) {
+      selectedProvider = provider;
+    }
+
+    const modelResolution = resolveModel(selectedModel, selectedProvider);
+    selectedModel = modelResolution.model;
+
+    if (!isProviderInitialized(selectedProvider)) {
+      await initAI(selectedProvider);
     }
 
     const prompt = `Analiza los siguientes cambios de Git y genera un título y descripción profesional para un Pull Request en GitHub.
@@ -42,7 +50,12 @@ La descripción debe explicar qué cambios se hacen y por qué.`;
       }
     ];
 
-    const response = await callOpenRouter(messages, selectedModel, 400, 0.7);
+    const response = await callAI(messages, {
+      provider: selectedProvider,
+      model: selectedModel,
+      maxTokens: 400,
+      temperature: 0.7
+    });
 
     const content = (response.content || '').trim();
 
@@ -50,21 +63,23 @@ La descripción debe explicar qué cambios se hacen y por qué.`;
       throw new Error('La IA no generó contenido de PR válido.');
     }
 
-    // Parsear la respuesta
-    const titleMatch = content.match(/TÍTULO:\s*(.+?)(?:\n|$)/i);
-    const descriptionMatch = content.match(/DESCRIPCIÓN:\s*(.+?)(?:\n|$)/is);
-
-    const title = titleMatch ? titleMatch[1].trim() : 'New PR';
-    const description = descriptionMatch ? descriptionMatch[1].trim() : 'PR description';
+    const title = parseStructuredField(content, 'TÍTULO') || 'New PR';
+    const description = parseStructuredField(content, 'DESCRIPCIÓN') || 'PR description';
 
     return {
       title: title.substring(0, 60),
       description: description.substring(0, 500),
       fullContent: content,
-      model: response.model
+      model: response.model,
+      provider: selectedProvider,
+      modelWarning: modelResolution.warning
     };
   } catch (error) {
-    throw new Error(`Error al generar contenido de PR: ${error.message}`);
+    const prefix = 'Error al generar contenido de PR';
+    if (error.message.startsWith(prefix) || error.message.includes('no generó contenido')) {
+      throw error;
+    }
+    throw new Error(`${prefix}: ${error.message}`);
   }
 }
 

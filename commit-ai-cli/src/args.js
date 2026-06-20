@@ -1,3 +1,5 @@
+import { isValidProvider, normalizeProvider } from './config.js';
+
 /**
  * Módulo para parsear argumentos de línea de comandos
  */
@@ -37,6 +39,18 @@ export class CLIArgs {
         if (i + 1 < this.args.length) {
           this.flags.model = this.args[i + 1];
           i++;
+        }
+      } else if (arg === '--provider' || arg === '-p') {
+        if (i + 1 < this.args.length && !this.args[i + 1].startsWith('-')) {
+          const providerValue = this.args[i + 1];
+          const normalized = normalizeProvider(providerValue);
+          if (!isValidProvider(normalized)) {
+            throw new Error(`Proveedor no válido: ${providerValue}. Valores: openrouter, deepseek`);
+          }
+          this.flags.provider = normalized;
+          i++;
+        } else {
+          throw new Error('El flag --provider requiere un valor (openrouter o deepseek)');
         }
       } else if (arg === '--message' || arg === '-msg') {
         if (i + 1 < this.args.length) {
@@ -104,6 +118,13 @@ export class CLIArgs {
    */
   getModel() {
     return this.flags.model || null;
+  }
+
+  /**
+   * Obtiene el proveedor especificado
+   */
+  getProvider() {
+    return this.flags.provider || null;
   }
 
   /**
@@ -180,7 +201,10 @@ OPCIONES:
                            Valores: conventional, emoji, descriptive
   
   -m, --model <modelo>     Especificar modelo de IA
-                           Ej: gpt-5.4-nano, claude-3.5-sonnet
+                           Ej: gpt-5.4-nano, deepseek-v4-flash
+
+  -p, --provider <prov>    Proveedor de IA
+                           Valores: openrouter, deepseek
   
   -msg, --message <msg>    Usar mensaje personalizado
                            (no genera con IA, usa el mensaje directo)
@@ -218,6 +242,9 @@ EJEMPLOS:
   # Usar modelo específico
   commit-ai -m gpt-5.4 -a
 
+  # Usar DeepSeek como proveedor
+  commit-ai --provider deepseek -m deepseek-v4-flash -a
+
   # Usar mensaje personalizado
   commit-ai -msg "feat: add new feature" -a
 
@@ -234,7 +261,7 @@ EJEMPLOS:
   commit-ai --stats
 
   # Combinar opciones
-  commit-ai -s conventional -m claude-3.5-sonnet --no-confirm
+  commit-ai -s conventional -p openrouter -m claude-3.5-sonnet --no-confirm
 
 CONFIGURACIÓN:
 
@@ -254,7 +281,7 @@ MODO NO INTERACTIVO (por defecto):
 MODO INTERACTIVO (-i):
   
   1. Muestra menú para seleccionar estilo
-  2. Pregunta si cambiar modelo
+  2. Pregunta si cambiar proveedor y modelo
   3. Genera commit con IA
   4. Muestra opciones: ejecutar, editar, regenerar, cancelar
   5. Guarda configuración y historial
